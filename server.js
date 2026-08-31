@@ -249,8 +249,18 @@ app.post('/api/campaigns/:id/send', async (req, res) => {
 async function sendCampaign(campaign, contacts, template) {
   const campaigns = readJSON(campaignsFile);
   const idx = campaigns.findIndex(c => c.id === campaign.id);
+  let consecutiveFails = 0;
+  const MAX_CONSECUTIVE_FAILS = 5;
 
   for (const result of campaign.results) {
+    if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+      result.status = 'failed';
+      result.error = 'Paused: Too many consecutive failures (possible ban)';
+      result.sentAt = new Date().toISOString();
+      io.emit('campaign-update', { campaignId: campaign.id, result });
+      continue;
+    }
+
     const contact = contacts.find(c => c.id === result.contactId);
     if (!contact) {
       result.status = 'failed';
@@ -263,20 +273,31 @@ async function sendCampaign(campaign, contacts, template) {
     const phone = contact.phone.replace(/[^0-9]/g, '');
     const jid = `${phone}@s.whatsapp.net`;
 
-    const [exists] = await sock.onWhatsApp(jid);
-    if (!exists) {
+    try {
+      const [exists] = await sock.onWhatsApp(jid);
+      if (!exists) {
+        result.status = 'failed';
+        result.error = 'Number not on WhatsApp';
+        result.sentAt = new Date().toISOString();
+        io.emit('campaign-update', { campaignId: campaign.id, result });
+        consecutiveFails++;
+        continue;
+      }
+    } catch (err) {
       result.status = 'failed';
-      result.error = 'Number not on WhatsApp';
+      result.error = 'Check failed: ' + err.message;
       result.sentAt = new Date().toISOString();
       io.emit('campaign-update', { campaignId: campaign.id, result });
-      campaigns[idx] = campaign;
-      writeJSON(campaignsFile, campaigns);
+      consecutiveFails++;
       continue;
     }
 
     let messageText = template.text;
     messageText = messageText.replace(/\{\{name\}\}/gi, contact.name);
     messageText = messageText.replace(/\{\{phone\}\}/gi, contact.phone);
+
+    const variations = ['\u200B', '\u200C', '\u200D', '\uFEFF'];
+    messageText += variations[Math.floor(Math.random() * variations.length)];
 
     try {
       if (campaign.mediaUrl && fs.existsSync(campaign.mediaUrl)) {
@@ -292,10 +313,12 @@ async function sendCampaign(campaign, contacts, template) {
       }
       result.status = 'sent';
       result.sentAt = new Date().toISOString();
+      consecutiveFails = 0;
     } catch (err) {
       result.status = 'failed';
       result.error = err.message || 'Unknown error';
       result.sentAt = new Date().toISOString();
+      consecutiveFails++;
     }
 
     io.emit('campaign-update', { campaignId: campaign.id, result });
@@ -303,7 +326,9 @@ async function sendCampaign(campaign, contacts, template) {
     campaigns[idx] = campaign;
     writeJSON(campaignsFile, campaigns);
 
-    await new Promise(r => setTimeout(r, (campaign.delay || 5) * 1000));
+    const baseDelay = (campaign.delay || 5) * 1000;
+    const randomDelay = baseDelay + (Math.random() * baseDelay * 0.6 - baseDelay * 0.3);
+    await new Promise(r => setTimeout(r, Math.round(randomDelay)));
   }
 
   campaign.status = 'completed';
