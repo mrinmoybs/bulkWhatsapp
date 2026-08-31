@@ -9,10 +9,12 @@ socket.on('status', (data) => {
   const statusEl = document.getElementById('connection-status');
   const textEl = document.getElementById('status-text');
   const qrSection = document.getElementById('qr-section');
+  const logoutBtn = document.getElementById('logout-btn');
 
   statusEl.className = 'status ' + (data.state === 'ready' ? 'connected' : data.state === 'qr' ? 'pending' : 'disconnected');
   textEl.textContent = data.message;
   qrSection.classList.toggle('hidden', data.state !== 'qr');
+  logoutBtn.style.display = data.state === 'ready' ? 'block' : 'none';
 });
 
 socket.on('qr', (qr) => {
@@ -36,6 +38,12 @@ socket.on('campaign-done', (data) => {
     renderCampaigns();
   }
 });
+
+// --- Logout ---
+async function logoutWhatsApp() {
+  if (!confirm('Logout from WhatsApp? You will need to scan QR again.')) return;
+  await fetch('/api/logout', { method: 'POST' });
+}
 
 // --- Tabs ---
 document.querySelectorAll('.tab').forEach(tab => {
@@ -109,6 +117,12 @@ async function deleteContact(id) {
   await fetch(`/api/contacts/${id}`, { method: 'DELETE' });
   loadContacts();
 }
+
+document.getElementById('clear-contacts-btn').addEventListener('click', async () => {
+  if (!confirm('Delete ALL contacts? This cannot be undone.')) return;
+  await fetch('/api/contacts', { method: 'DELETE' });
+  loadContacts();
+});
 
 document.getElementById('import-csv-btn').addEventListener('click', () => {
   document.getElementById('csv-input').click();
@@ -283,7 +297,15 @@ document.getElementById('new-campaign-btn').addEventListener('click', () => {
         ${escapeHtml(c.name)} (${escapeHtml(c.phone)})
       </label>
     `).join('');
+
+    document.getElementById('select-all-campaign-contacts').checked = false;
   }
+});
+
+document.getElementById('select-all-campaign-contacts').addEventListener('change', (e) => {
+  document.querySelectorAll('.campaign-contact-cb').forEach(cb => {
+    cb.checked = e.target.checked;
+  });
 });
 
 document.getElementById('cancel-campaign-btn').addEventListener('click', () => {

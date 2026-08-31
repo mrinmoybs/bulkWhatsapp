@@ -112,6 +112,19 @@ app.post('/api/reconnect', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/logout', async (req, res) => {
+  if (whatsappClient) {
+    try {
+      await whatsappClient.logout();
+      await whatsappClient.destroy();
+    } catch (e) {}
+    whatsappClient = null;
+    isWhatsAppReady = false;
+    io.emit('status', { state: 'disconnected', message: 'Logged out' });
+  }
+  res.json({ ok: true });
+});
+
 // Contacts
 app.get('/api/contacts', (req, res) => {
   res.json(readJSON(contactsFile));
@@ -139,6 +152,11 @@ app.delete('/api/contacts/:id', (req, res) => {
   let contacts = readJSON(contactsFile);
   contacts = contacts.filter(c => c.id !== req.params.id);
   writeJSON(contactsFile, contacts);
+  res.json({ ok: true });
+});
+
+app.delete('/api/contacts', (req, res) => {
+  writeJSON(contactsFile, []);
   res.json({ ok: true });
 });
 

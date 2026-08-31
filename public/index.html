@@ -10,9 +10,12 @@
   <div class="app">
     <header>
       <h1>Bulk WhatsApp Sender</h1>
-      <div id="connection-status" class="status disconnected">
-        <span class="dot"></span>
-        <span id="status-text">Connecting...</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div id="connection-status" class="status disconnected">
+          <span class="dot"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+        <button id="logout-btn" class="btn btn-danger btn-sm" onclick="logoutWhatsApp()" style="display:none">Logout</button>
       </div>
     </header>
 
@@ -35,6 +38,7 @@
         <div class="actions">
           <button id="add-contact-btn" class="btn btn-primary">+ Add Contact</button>
           <button id="import-csv-btn" class="btn btn-secondary">Import CSV</button>
+          <button id="clear-contacts-btn" class="btn btn-danger">Clear All</button>
           <input type="file" id="csv-input" accept=".csv" hidden>
         </div>
       </div>
@@ -105,6 +109,9 @@
         </div>
         <div class="form-row">
           <label>Select Contacts:</label>
+          <label style="margin-bottom:6px;display:block;font-weight:normal">
+            <input type="checkbox" id="select-all-campaign-contacts"> Select All
+          </label>
           <div id="campaign-contacts" class="checkbox-list"></div>
         </div>
         <div class="form-actions">
