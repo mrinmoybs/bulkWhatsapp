@@ -45,6 +45,11 @@ async function logoutWhatsApp() {
   await fetch('/api/logout', { method: 'POST' });
 }
 
+// --- Reconnect ---
+async function reconnectWhatsApp() {
+  await fetch('/api/reconnect', { method: 'POST' });
+}
+
 // --- Tabs ---
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {

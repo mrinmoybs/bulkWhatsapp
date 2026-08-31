@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const multer = require('multer');
 const path = require('path');
@@ -14,6 +14,7 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const AUTH_DIR = path.join(__dirname, '.baileys_auth');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -41,67 +42,48 @@ function writeJSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-let whatsappClient = null;
+let sock = null;
 let isWhatsAppReady = false;
 
-function findChrome() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  const paths = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-  ];
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
+async function initWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-function initWhatsApp() {
-  const chromePath = findChrome();
-  const puppeteerConfig = { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] };
-  if (chromePath) puppeteerConfig.executablePath = chromePath;
-
-  whatsappClient = new Client({
-    authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
-    puppeteer: puppeteerConfig
+  sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: true,
+    browser: ['Bulk WhatsApp Sender', 'Chrome', '1.0.0'],
   });
 
-  whatsappClient.on('qr', (qr) => {
-    qrcode.generate(qr, { small: true });
-    io.emit('qr', qr);
-    io.emit('status', { state: 'qr', message: 'Scan QR code with WhatsApp' });
-  });
+  sock.ev.on('creds.update', saveCreds);
 
-  whatsappClient.on('ready', () => {
-    isWhatsAppReady = true;
-    io.emit('status', { state: 'ready', message: 'WhatsApp Connected' });
-    console.log('WhatsApp client ready!');
-  });
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-  whatsappClient.on('authenticated', () => {
-    io.emit('status', { state: 'authenticated', message: 'Authenticated...' });
-  });
+    if (qr) {
+      io.emit('qr', qr);
+      io.emit('status', { state: 'qr', message: 'Scan QR code with WhatsApp' });
+    }
 
-  whatsappClient.on('auth_failure', (msg) => {
-    isWhatsAppReady = false;
-    io.emit('status', { state: 'error', message: 'Authentication failed' });
-    console.error('Auth failure:', msg);
-  });
+    if (connection === 'open') {
+      isWhatsAppReady = true;
+      io.emit('status', { state: 'ready', message: 'WhatsApp Connected' });
+      console.log('WhatsApp connected!');
+    }
 
-  whatsappClient.on('disconnected', () => {
-    isWhatsAppReady = false;
-    io.emit('status', { state: 'disconnected', message: 'WhatsApp Disconnected' });
-    console.log('WhatsApp disconnected');
-  });
+    if (connection === 'close') {
+      isWhatsAppReady = false;
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
 
-  whatsappClient.initialize();
+      if (statusCode === DisconnectReason.loggedOut) {
+        io.emit('status', { state: 'disconnected', message: 'Logged out. Scan QR again.' });
+        if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true });
+      } else {
+        io.emit('status', { state: 'disconnected', message: 'Disconnected. Reconnecting...' });
+      }
+
+      setTimeout(() => initWhatsApp(), 3000);
+    }
+  });
 }
 
 // --- API Routes ---
@@ -110,25 +92,24 @@ app.get('/api/status', (req, res) => {
   res.json({ ready: isWhatsAppReady });
 });
 
-app.post('/api/reconnect', (req, res) => {
-  if (whatsappClient) {
-    whatsappClient.destroy().then(() => initWhatsApp());
-  } else {
-    initWhatsApp();
+app.post('/api/reconnect', async (req, res) => {
+  if (sock) {
+    try { sock.end(); } catch (e) {}
   }
+  isWhatsAppReady = false;
+  setTimeout(() => initWhatsApp(), 1000);
   res.json({ ok: true });
 });
 
 app.post('/api/logout', async (req, res) => {
-  if (whatsappClient) {
-    try {
-      await whatsappClient.logout();
-      await whatsappClient.destroy();
-    } catch (e) {}
-    whatsappClient = null;
+  if (sock) {
+    try { sock.logout(); } catch (e) {}
+    try { sock.end(); } catch (e) {}
+    sock = null;
     isWhatsAppReady = false;
-    io.emit('status', { state: 'disconnected', message: 'Logged out' });
   }
+  if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true });
+  io.emit('status', { state: 'disconnected', message: 'Logged out' });
   res.json({ ok: true });
 });
 
@@ -262,7 +243,6 @@ app.post('/api/campaigns/:id/send', async (req, res) => {
 
   res.json({ ok: true, message: 'Campaign sending started' });
 
-  // Send in background
   sendCampaign(campaign, contacts, template);
 });
 
@@ -281,7 +261,18 @@ async function sendCampaign(campaign, contacts, template) {
     }
 
     const phone = contact.phone.replace(/[^0-9]/g, '');
-    const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
+    const jid = `${phone}@s.whatsapp.net`;
+
+    const [exists] = await sock.onWhatsApp(jid);
+    if (!exists) {
+      result.status = 'failed';
+      result.error = 'Number not on WhatsApp';
+      result.sentAt = new Date().toISOString();
+      io.emit('campaign-update', { campaignId: campaign.id, result });
+      campaigns[idx] = campaign;
+      writeJSON(campaignsFile, campaigns);
+      continue;
+    }
 
     let messageText = template.text;
     messageText = messageText.replace(/\{\{name\}\}/gi, contact.name);
@@ -289,16 +280,21 @@ async function sendCampaign(campaign, contacts, template) {
 
     try {
       if (campaign.mediaUrl && fs.existsSync(campaign.mediaUrl)) {
-        const media = MessageMedia.fromFilePath(campaign.mediaUrl);
-        await whatsappClient.sendMessage(chatId, media, { caption: messageText });
+        const mediaBuffer = fs.readFileSync(campaign.mediaUrl);
+        const mimeType = getMimeType(campaign.mediaUrl);
+        await sock.sendMessage(jid, {
+          image: mediaBuffer,
+          mimetype: mimeType,
+          caption: messageText
+        });
       } else {
-        await whatsappClient.sendMessage(chatId, messageText);
+        await sock.sendMessage(jid, { text: messageText });
       }
       result.status = 'sent';
       result.sentAt = new Date().toISOString();
     } catch (err) {
       result.status = 'failed';
-      result.error = err.message;
+      result.error = err.message || 'Unknown error';
       result.sentAt = new Date().toISOString();
     }
 
@@ -316,22 +312,31 @@ async function sendCampaign(campaign, contacts, template) {
   io.emit('campaign-done', { campaignId: campaign.id });
 }
 
-// Media upload
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const types = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+    '.gif': 'image/gif', '.webp': 'image/webp',
+    '.mp4': 'video/mp4', '.avi': 'video/avi',
+    '.pdf': 'application/pdf', '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+  return types[ext] || 'application/octet-stream';
+}
+
 app.post('/api/upload', upload.single('media'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
   res.json({ ok: true, path: req.file.path, filename: req.file.filename });
 });
 
-// Socket.IO
 io.on('connection', (socket) => {
   console.log('Client connected');
   socket.emit('status', {
     state: isWhatsAppReady ? 'ready' : 'disconnected',
-    message: isWhatsAppReady ? 'WhatsApp Connected' : 'WhatsApp Disconnected'
+    message: isWhatsAppReady ? 'WhatsApp Connected' : 'Waiting for connection...'
   });
 });
 
-// Start
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
   initWhatsApp();
