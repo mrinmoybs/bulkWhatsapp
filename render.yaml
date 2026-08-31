@@ -3,7 +3,7 @@ services:
     name: bulk-whatsapp
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: ./build.sh
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
