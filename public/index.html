@@ -27,44 +27,64 @@
     </div>
 
     <nav class="tabs">
-      <button class="tab active" data-tab="contacts">Contacts</button>
+      <button class="tab active" data-tab="campaigns">Campaigns</button>
       <button class="tab" data-tab="templates">Templates</button>
-      <button class="tab" data-tab="campaigns">Campaigns</button>
     </nav>
 
-    <!-- Contacts Tab -->
-    <section id="contacts-tab" class="tab-content active">
+    <!-- Campaigns Tab (Mailbox Style) -->
+    <section id="campaigns-tab" class="tab-content active">
       <div class="section-header">
-        <h2>Contacts</h2>
-        <div class="actions">
-          <button id="add-contact-btn" class="btn btn-primary">+ Add Contact</button>
-          <button id="import-csv-btn" class="btn btn-secondary">Import CSV</button>
-          <button id="clear-contacts-btn" class="btn btn-danger">Clear All</button>
-          <input type="file" id="csv-input" accept=".csv" hidden>
+        <button id="new-campaign-btn" class="btn btn-primary">+ New Campaign</button>
+      </div>
+
+      <!-- New Campaign Form -->
+      <div id="new-campaign-form" class="compose-box hidden">
+        <div class="compose-header">
+          <span>New Campaign</span>
+          <button class="btn-close" onclick="document.getElementById('new-campaign-form').classList.add('hidden')">&times;</button>
+        </div>
+        <div class="compose-body">
+          <input type="text" id="campaign-name" placeholder="Campaign Name (e.g. Wedding Invitation)" class="compose-input">
+          <div class="compose-row">
+            <label>Template:</label>
+            <select id="campaign-template" class="compose-select"></select>
+          </div>
+          <div class="compose-row">
+            <label>Delay:</label>
+            <select id="campaign-delay" class="compose-select" style="max-width:150px">
+              <option value="5">5 seconds</option>
+              <option value="8" selected>8 seconds (Recommended)</option>
+              <option value="10">10 seconds</option>
+              <option value="15">15 seconds</option>
+            </select>
+          </div>
+          <div class="compose-row">
+            <label>Media (optional if template selected):</label>
+            <label class="file-label">
+              <input type="file" id="campaign-media" accept="image/*,video/*,.pdf,.doc,.docx" hidden>
+              <span id="media-filename">Choose file...</span>
+            </label>
+          </div>
+          <div class="compose-row">
+            <label>Import Contacts (CSV):</label>
+            <label class="file-label">
+              <input type="file" id="campaign-csv" accept=".csv" hidden>
+              <span id="csv-filename">Choose CSV file...</span>
+            </label>
+            <small class="help-text">Format: Name,Phone (e.g. Rahul,919876543210) — Max 25 contacts</small>
+            <small class="help-text" style="color:#888">At least one of template or media is required</small>
+            <div id="csv-preview" class="csv-preview hidden"></div>
+          </div>
+          <div class="compose-actions">
+            <button id="send-campaign-btn" class="btn btn-primary">Send Campaign</button>
+            <button id="cancel-campaign-btn" class="btn btn-secondary">Discard</button>
+          </div>
         </div>
       </div>
 
-      <div id="add-contact-form" class="form-inline hidden">
-        <input type="text" id="contact-name" placeholder="Name">
-        <input type="text" id="contact-phone" placeholder="Phone (e.g. 919876543210)">
-        <button id="save-contact-btn" class="btn btn-primary">Save</button>
-        <button id="cancel-contact-btn" class="btn btn-secondary">Cancel</button>
-      </div>
-
-      <div class="table-wrapper">
-        <table id="contacts-table">
-          <thead>
-            <tr>
-              <th><input type="checkbox" id="select-all-contacts"></th>
-              <th>Name</th>
-              <th>Phone</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="contacts-body"></tbody>
-        </table>
-      </div>
-      <p id="no-contacts" class="empty-msg">No contacts yet. Add contacts or import from CSV.</p>
+      <!-- Campaign Mailbox -->
+      <div id="campaigns-list" class="mailbox"></div>
+      <p id="no-campaigns" class="empty-msg">No campaigns yet. Click "+ New Campaign" to start.</p>
     </section>
 
     <!-- Templates Tab -->
@@ -74,55 +94,23 @@
         <button id="add-template-btn" class="btn btn-primary">+ New Template</button>
       </div>
 
-      <div id="add-template-form" class="form-block hidden">
-        <input type="text" id="template-name" placeholder="Template Name">
-        <textarea id="template-text" placeholder="Message text. Use {{name}} and {{phone}} as placeholders." rows="5"></textarea>
-        <div class="form-actions">
-          <button id="save-template-btn" class="btn btn-primary">Save</button>
-          <button id="cancel-template-btn" class="btn btn-secondary">Cancel</button>
+      <div id="add-template-form" class="compose-box hidden">
+        <div class="compose-header">
+          <span>New Template</span>
+          <button class="btn-close" onclick="document.getElementById('add-template-form').classList.add('hidden')">&times;</button>
+        </div>
+        <div class="compose-body">
+          <input type="text" id="template-name" placeholder="Template Name" class="compose-input">
+          <textarea id="template-text" placeholder="Write your message here...&#10;&#10;Use {{name}} for guest name&#10;Use {{phone}} for phone number" rows="6" class="compose-textarea"></textarea>
+          <div class="compose-actions">
+            <button id="save-template-btn" class="btn btn-primary">Save Template</button>
+            <button id="cancel-template-btn" class="btn btn-secondary">Discard</button>
+          </div>
         </div>
       </div>
 
       <div id="templates-list"></div>
-      <p id="no-templates" class="empty-msg">No templates yet.</p>
-    </section>
-
-    <!-- Campaigns Tab -->
-    <section id="campaigns-tab" class="tab-content">
-      <div class="section-header">
-        <h2>Campaigns</h2>
-        <button id="new-campaign-btn" class="btn btn-primary">+ New Campaign</button>
-      </div>
-
-      <div id="new-campaign-form" class="form-block hidden">
-        <input type="text" id="campaign-name" placeholder="Campaign Name">
-        <div class="form-row">
-          <label>Template:</label>
-          <select id="campaign-template"></select>
-        </div>
-        <div class="form-row">
-          <label>Delay (seconds):</label>
-          <input type="number" id="campaign-delay" value="5" min="3" max="60">
-        </div>
-        <div class="form-row">
-          <label>Media (optional):</label>
-          <input type="file" id="campaign-media" accept="image/*,video/*,.pdf,.doc,.docx">
-        </div>
-        <div class="form-row">
-          <label>Select Contacts:</label>
-          <label style="margin-bottom:6px;display:block;font-weight:normal">
-            <input type="checkbox" id="select-all-campaign-contacts"> Select All
-          </label>
-          <div id="campaign-contacts" class="checkbox-list"></div>
-        </div>
-        <div class="form-actions">
-          <button id="save-campaign-btn" class="btn btn-primary">Create Campaign</button>
-          <button id="cancel-campaign-btn" class="btn btn-secondary">Cancel</button>
-        </div>
-      </div>
-
-      <div id="campaigns-list"></div>
-      <p id="no-campaigns" class="empty-msg">No campaigns yet.</p>
+      <p id="no-templates" class="empty-msg">No templates yet. Templates are optional — you can send media-only messages without one.</p>
     </section>
   </div>
 

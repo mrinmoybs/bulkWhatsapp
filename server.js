@@ -118,6 +118,22 @@ app.get('/api/contacts', (req, res) => {
   res.json(readJSON(contactsFile));
 });
 
+app.get('/api/contacts/sent-phones', (req, res) => {
+  const campaigns = readJSON(campaignsFile);
+  const contacts = readJSON(contactsFile);
+  const sentPhones = new Set();
+  for (const c of campaigns) {
+    if (c.status !== 'sending' && c.status !== 'completed') continue;
+    for (const r of (c.results || [])) {
+      if (r.status === 'sent') {
+        const contact = contacts.find(ct => ct.id === r.contactId);
+        if (contact) sentPhones.add(contact.phone.replace(/[^0-9]/g, ''));
+      }
+    }
+  }
+  res.json([...sentPhones]);
+});
+
 app.post('/api/contacts', (req, res) => {
   const contacts = readJSON(contactsFile);
   const { name, phone } = req.body;
@@ -206,6 +222,11 @@ app.get('/api/campaigns', (req, res) => {
 app.post('/api/campaigns', (req, res) => {
   const campaigns = readJSON(campaignsFile);
   const { name, contactIds, templateId, delay, mediaUrl } = req.body;
+
+  if (contactIds.length > 25) {
+    return res.status(400).json({ error: 'Maximum 25 contacts allowed per campaign' });
+  }
+
   const id = Date.now().toString();
   const campaign = {
     id, name, contactIds, templateId, delay: delay || 5, mediaUrl: mediaUrl || null,
@@ -232,11 +253,14 @@ app.post('/api/campaigns/:id/send', async (req, res) => {
   const campaign = campaigns.find(c => c.id === req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
+  const hasMedia = campaign.mediaUrl && fs.existsSync(campaign.mediaUrl);
+  if (!campaign.templateId && !hasMedia) {
+    return res.status(400).json({ error: 'Either a template or media file is required' });
+  }
+
   const contacts = readJSON(contactsFile);
   const templates = readJSON(templatesFile);
-  const template = templates.find(t => t.id === campaign.templateId);
-
-  if (!template) return res.status(400).json({ error: 'Template not found' });
+  const template = campaign.templateId ? templates.find(t => t.id === campaign.templateId) : null;
 
   campaign.status = 'sending';
   writeJSON(campaignsFile, campaigns);
@@ -292,9 +316,11 @@ async function sendCampaign(campaign, contacts, template) {
       continue;
     }
 
-    let messageText = template.text;
-    messageText = messageText.replace(/\{\{name\}\}/gi, contact.name);
-    messageText = messageText.replace(/\{\{phone\}\}/gi, contact.phone);
+    let messageText = template ? template.text : '';
+    if (template) {
+      messageText = messageText.replace(/\{\{name\}\}/gi, contact.name);
+      messageText = messageText.replace(/\{\{phone\}\}/gi, contact.phone);
+    }
 
     const variations = ['\u200B', '\u200C', '\u200D', '\uFEFF'];
     messageText += variations[Math.floor(Math.random() * variations.length)];
@@ -303,11 +329,31 @@ async function sendCampaign(campaign, contacts, template) {
       if (campaign.mediaUrl && fs.existsSync(campaign.mediaUrl)) {
         const mediaBuffer = fs.readFileSync(campaign.mediaUrl);
         const mimeType = getMimeType(campaign.mediaUrl);
-        await sock.sendMessage(jid, {
-          image: mediaBuffer,
-          mimetype: mimeType,
-          caption: messageText
-        });
+        const ext = path.extname(campaign.mediaUrl).toLowerCase();
+        const videoExts = ['.mp4', '.avi', '.mov', '.mkv', '.webm'];
+        const docExts = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt'];
+        const caption = messageText.trim() || undefined;
+
+        if (videoExts.includes(ext)) {
+          await sock.sendMessage(jid, {
+            video: mediaBuffer,
+            mimetype: mimeType,
+            ...(caption ? { caption } : {})
+          });
+        } else if (docExts.includes(ext)) {
+          await sock.sendMessage(jid, {
+            document: mediaBuffer,
+            mimetype: mimeType,
+            fileName: path.basename(campaign.mediaUrl),
+            ...(caption ? { caption } : {})
+          });
+        } else {
+          await sock.sendMessage(jid, {
+            image: mediaBuffer,
+            mimetype: mimeType,
+            ...(caption ? { caption } : {})
+          });
+        }
       } else {
         await sock.sendMessage(jid, { text: messageText });
       }
